@@ -28,28 +28,54 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
-from legged_gym.envs.a1.a1_config import A1RoughCfg, A1RoughCfgPPO
-from .base.legged_robot import LeggedRobot
-from .anymal_c.anymal import Anymal
-from .anymal_c.mixed_terrains.anymal_c_rough_config import AnymalCRoughCfg, AnymalCRoughCfgPPO
-from .anymal_c.flat.anymal_c_flat_config import AnymalCFlatCfg, AnymalCFlatCfgPPO
-from .anymal_b.anymal_b_config import AnymalBRoughCfg, AnymalBRoughCfgPPO
-from .cassie.cassie import Cassie
-from .cassie.cassie_config import CassieRoughCfg, CassieRoughCfgPPO
-from .a1.a1_config import A1RoughCfg, A1RoughCfgPPO
+from legged_gym.envs import AnymalCFlatCfg, AnymalCFlatCfgPPO
 
-from .anymal_c.marl.anymal_c_marl_config import AnymalCMARLCfg, AnymalCMARLCfgPPO
+class AnymalCMARLCfg( AnymalCFlatCfg ):
+	class env( AnymalCFlatCfg.env ):
+		num_agents = 4
+
+	class rewards( AnymalCFlatCfg.rewards ):
+		class scales( AnymalCFlatCfg.rewards.scales ):
+			termination = -0.0
+			tracking_lin_vel = 1.0
+			tracking_ang_vel = 0.5
+			lin_vel_z = -2.0
+			ang_vel_xy = -0.05
+			orientation = -5.0
+			dof_vel = 0.
+			dof_acc = 0.
+			base_height = -0. 
+			feet_air_time =  0.
+			collision = 0.
+			feet_stumble = 0.
+			action_rate = 0.
+			stand_still = 0.
+			
+			leg_1_torques = -0.000025
+			leg_1_dof_acc = -2.5e-7
+			leg_1_feet_air_time = 2.
+			leg_1_collision = -1.
+			leg_1_action_rate = -0.01
+
+			leg_2_torques = -0.000025
+			leg_2_dof_acc = -2.5e-7
+			leg_2_feet_air_time = 2.
+			leg_2_collision = -1.
+			leg_2_action_rate = -0.01
+
+			leg_3_torques = -0.000025
+			leg_3_dof_acc = -2.5e-7
+			leg_3_feet_air_time = 2.
+			leg_3_collision = -1.
+			leg_3_action_rate = -0.01
+
+			leg_4_torques = -0.000025
+			leg_4_dof_acc = -2.5e-7
+			leg_4_feet_air_time = 2.
+			leg_4_collision = -1.
+			leg_4_action_rate = -0.01
 
 
-import os
-
-from legged_gym.utils.task_registry import task_registry
-
-task_registry.register( "anymal_c_rough", Anymal, AnymalCRoughCfg(), AnymalCRoughCfgPPO() )
-task_registry.register( "anymal_c_flat", Anymal, AnymalCFlatCfg(), AnymalCFlatCfgPPO() )
-task_registry.register( "anymal_b", Anymal, AnymalBRoughCfg(), AnymalBRoughCfgPPO() )
-task_registry.register( "a1", LeggedRobot, A1RoughCfg(), A1RoughCfgPPO() )
-task_registry.register( "cassie", Cassie, CassieRoughCfg(), CassieRoughCfgPPO() )
-
-task_registry.register( "anymal_c_marl", Anymal, AnymalCMARLCfg(), AnymalCMARLCfgPPO() )
+class AnymalCMARLCfgPPO( AnymalCFlatCfgPPO ):
+    class runner ( AnymalCFlatCfgPPO.runner):
+        experiment_name = 'marl_anymal_c'
