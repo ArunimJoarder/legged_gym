@@ -30,52 +30,56 @@
 
 from legged_gym.envs import AnymalCFlatCfg, AnymalCFlatCfgPPO
 
-class AnymalCMARLCfg( AnymalCFlatCfg ):
+class AnymalCMARL_2_FlatCfg( AnymalCFlatCfg ):
 	class env( AnymalCFlatCfg.env ):
-		num_agents = 4
+		num_agents = 2
+		num_dof_per_agent = 6
+		num_actions_per_agent = 6
+		num_obs_per_agent = 48
+		num_privileged_obs_per_agent = None
+
+	class asset( AnymalCFlatCfg.asset ):
+		penalize_contacts_on = ["LF_SHANK", "LF_THIGH", "LH_SHANK", "LH_THIGH", "RF_SHANK", "RF_THIGH", "RH_SHANK", "RH_THIGH"]
 
 	class rewards( AnymalCFlatCfg.rewards ):
 		class scales( AnymalCFlatCfg.rewards.scales ):
+			dof_acc = 0.
+			dof_vel = 0.
+			# feet_air_time =  0.
+			feet_air_time =  2.
+			action_rate = 0.
+			torques = 0.
+			
+			orientation = -5.0
+		
 			termination = -0.0
 			tracking_lin_vel = 1.0
 			tracking_ang_vel = 0.5
 			lin_vel_z = -2.0
 			ang_vel_xy = -0.05
-			orientation = -5.0
-			dof_vel = 0.
-			dof_acc = 0.
-			base_height = -0. 
-			feet_air_time =  0.
+			base_height = 0. 
 			collision = 0.
-			feet_stumble = 0.
-			action_rate = 0.
-			stand_still = 0.
-			
-			leg_1_torques = -0.000025
-			leg_1_dof_acc = -2.5e-7
-			leg_1_feet_air_time = 2.
-			leg_1_collision = -1.
-			leg_1_action_rate = -0.01
+			feet_stumble = -0.0 
+			stand_still = -0.
 
-			leg_2_torques = -0.000025
-			leg_2_dof_acc = -2.5e-7
-			leg_2_feet_air_time = 2.
-			leg_2_collision = -1.
-			leg_2_action_rate = -0.01
+			agent_1_2_torques = -0.000025
+			agent_1_2_dof_acc = -2.5e-7
+			agent_1_2_action_rate = -0.01
+			# agent_1_2_foot_air_time =  2.
+			agent_1_2_collision = -1.
 
-			leg_3_torques = -0.000025
-			leg_3_dof_acc = -2.5e-7
-			leg_3_feet_air_time = 2.
-			leg_3_collision = -1.
-			leg_3_action_rate = -0.01
-
-			leg_4_torques = -0.000025
-			leg_4_dof_acc = -2.5e-7
-			leg_4_feet_air_time = 2.
-			leg_4_collision = -1.
-			leg_4_action_rate = -0.01
+			agent_2_2_torques = -0.000025
+			agent_2_2_dof_acc = -2.5e-7
+			agent_2_2_action_rate = -0.01
+			# agent_2_2_foot_air_time =  2.
+			agent_2_2_collision = -1.
 
 
-class AnymalCMARLCfgPPO( AnymalCFlatCfgPPO ):
-    class runner ( AnymalCFlatCfgPPO.runner):
-        experiment_name = 'marl_anymal_c'
+class AnymalCMARL_2_FlatCfgPPO( AnymalCFlatCfgPPO ):
+	class policy( AnymalCFlatCfgPPO.policy ):
+		actor_hidden_dims = [128, 64, 32]
+		critic_hidden_dims = [128, 64, 32]
+		activation = 'elu' # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
+		
+	class runner ( AnymalCFlatCfgPPO.runner):
+		experiment_name = 'marl_2_flat_anymal_c'
