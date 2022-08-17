@@ -76,11 +76,12 @@ class LeggedRobot(BaseTask):
 			self.num_dof_per_agent = self.cfg.env.num_dof_per_agent
 			self.num_obs_per_agent = self.cfg.env.num_obs_per_agent
 			self.num_privileged_obs_per_agent = self.cfg.env.num_privileged_obs_per_agent
-			self.obs_buf = torch.zeros(self.num_envs, self.num_obs, device=self.device, dtype=torch.float)
+			self.obs_buf = torch.zeros(self.num_agents, self.num_envs, self.num_obs_per_agent, device=self.device, dtype=torch.float)
 			self.rew_buf = torch.zeros(self.num_agents, self.num_envs, device=self.device, dtype=torch.float)
-
-
-
+			if self.num_privileged_obs is not None:
+				self.privileged_obs_buf = torch.zeros(self.agents, self.num_envs, self.num_privileged_obs_per_agent, device=self.device, dtype=torch.float)
+			else: 
+				self.privileged_obs_buf = None
 
 		if not self.headless:
 			self.set_camera(self.cfg.viewer.pos, self.cfg.viewer.lookat)
@@ -250,18 +251,53 @@ class LeggedRobot(BaseTask):
 	def compute_observations(self):
 		""" Computes observations
 		"""
-		self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel,
+		if self.num_agents == None:
+			self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel,
+										self.base_ang_vel  * self.obs_scales.ang_vel,
+										self.projected_gravity,
+										self.commands[:, :3] * self.commands_scale,
+										(self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
+										self.dof_vel * self.obs_scales.dof_vel,
+										self.actions
+										),dim=-1)
+			# add perceptive inputs if not blind
+			if self.cfg.terrain.measure_heights:
+				heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
+				self.obs_buf = torch.cat((self.obs_buf, heights), dim=-1)
+		else:
+			all_obs = torch.cat((	self.base_lin_vel * self.obs_scales.lin_vel,
 									self.base_ang_vel  * self.obs_scales.ang_vel,
 									self.projected_gravity,
 									self.commands[:, :3] * self.commands_scale,
-									(self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
+								   	(self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
 									self.dof_vel * self.obs_scales.dof_vel,
 									self.actions
-									),dim=-1)
-		# add perceptive inputs if not blind
-		if self.cfg.terrain.measure_heights:
-			heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
-			self.obs_buf = torch.cat((self.obs_buf, heights), dim=-1)
+								),dim=-1)
+			all_obs = all_obs.repeat(self.num_agents,1,1)
+			all_obs = all_obs.to(self.device)
+
+			# agent_specific_obs = torch.zeros(self.num_agents, self.num_envs, self.num_dof_per_agent*2+12)
+			# for i in range(self.num_agents):
+			# 	agent_specific_obs[i] = torch.cat((	(self.dof_pos - self.default_dof_pos)[:, (self.num_dof_per_agent*i):(self.num_dof_per_agent*(i+1))] * self.obs_scales.dof_pos,
+			# 										self.dof_vel[:, (self.num_dof_per_agent*i):(self.num_dof_per_agent*(i+1))] * self.obs_scales.dof_vel,
+			# 										self.actions
+			# 								   	  ),dim=-1)
+			# agent_specific_obs = agent_specific_obs.to(self.device)
+			# self.obs_buf = torch.cat((	all_obs[:,:,:12],
+			# 							agent_specific_obs
+			# 						 ),dim=-1)
+
+			self.obs_buf = all_obs
+
+			if self.num_privileged_obs_per_agent is not None:
+				self.privileged_obs_buf = all_obs
+
+			# add perceptive inputs if not blind
+			if self.cfg.terrain.measure_heights:
+				heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
+				self.obs_buf = torch.cat((self.obs_buf, heights.repeat(self.num_agents, 1, 1)), dim=-1)
+				if self.num_privileged_obs_per_agent is not None:
+					self.privileged_obs_buf = torch.cat((self.privileged_obs_buf, heights.repeat(self.num_agents, 1, 1)), dim=-1)		
 		# add noise if needed
 		if self.add_noise:
 			self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
@@ -517,18 +553,27 @@ class LeggedRobot(BaseTask):
 			noise_vec[12:24] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
 			noise_vec[24:36] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
 			noise_vec[36:48] = 0. # previous actions
+			if self.cfg.terrain.measure_heights:
+				noise_vec[48:235] = noise_scales.height_measurements* noise_level * self.obs_scales.height_measurements
 		else:
-			# noise_vec[12:15] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
-			# noise_vec[15:18] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
-			# noise_vec[18:21] = 0. # previous actions
-			
+			# x = 12
+			# noise_vec[x:x+self.num_dof_per_agent] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
+			# x += self.num_dof_per_agent
+			# noise_vec[x:x+self.num_dof_per_agent] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
+			# x += self.num_dof_per_agent
+			# noise_vec[x:x+12] = 0. # previous actions
+			# x += 12
+			# if self.cfg.terrain.measure_heights:
+			# 	noise_vec[x:self.num_obs_per_agent] = noise_scales.height_measurements* noise_level * self.obs_scales.height_measurements
+
+
 			noise_vec[12:24] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
 			noise_vec[24:36] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
 			noise_vec[36:48] = 0. # previous actions
-			
 			if self.cfg.terrain.measure_heights:
 				noise_vec[48:235] = noise_scales.height_measurements* noise_level * self.obs_scales.height_measurements
-			return noise_vec
+
+		return noise_vec
 
 	#----------------------------------------
 	def _init_buffers(self):
@@ -997,20 +1042,19 @@ class LeggedRobot(BaseTask):
 	def _reward_agent_1_foot_air_time(self):
 		# Reward long steps
 		# Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
-		foot_index = 0
-		contact = self.contact_forces[:, 4*(foot_index+1), 2] > 1.
-		on_ground = torch.logical_or(contact, self.last_contacts[:,foot_index])
-		self.last_contacts[:,foot_index] = contact
-		first_contact = (self.feet_air_time[:,foot_index] > 0.) * on_ground
-		self.feet_air_time[:,foot_index] += self.dt
-		rew_airTime = (self.feet_air_time[:,foot_index] - 0.5) * first_contact # reward only on first contact with the ground
+		contact = self.contact_forces[:, 4, 2] > 1.
+		contact_filt = torch.logical_or(contact, self.last_contacts[:,0])
+		self.last_contacts[:,0] = contact
+		first_contact = (self.feet_air_time[:,0] > 0.) * contact_filt
+		self.feet_air_time[:,0] += self.dt
+		rew_airTime = (self.feet_air_time[:,0] - 0.5) * first_contact # reward only on first contact with the ground
 		rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
-		self.feet_air_time[:,foot_index] *= ~on_ground
+		self.feet_air_time[:,0] *= ~contact_filt
 		return rew_airTime	
 	
 	def _reward_agent_1_collision(self):
 		# Penalize collisions on selected bodies
-		return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices[0:2], :], dim=-1) > 0.1), dim=1)
+		return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices[[0,1]], :], dim=-1) > 0.1), dim=1)
 
 
 	def _reward_agent_2_torques(self):
@@ -1028,20 +1072,19 @@ class LeggedRobot(BaseTask):
 	def _reward_agent_2_foot_air_time(self):
 		# Reward long steps
 		# Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
-		foot_index = 1
-		contact = self.contact_forces[:, 4*(foot_index+1), 2] > 1.
-		on_ground = torch.logical_or(contact, self.last_contacts[:,foot_index])
-		self.last_contacts[:,foot_index] = contact
-		first_contact = (self.feet_air_time[:,foot_index] > 0.) * on_ground
-		self.feet_air_time[:,foot_index] += self.dt
-		rew_airTime = (self.feet_air_time[:,foot_index] - 0.5) * first_contact # reward only on first contact with the ground
+		contact = self.contact_forces[:, 8, 2] > 1.
+		contact_filt = torch.logical_or(contact, self.last_contacts[:,1])
+		self.last_contacts[:,1] = contact
+		first_contact = (self.feet_air_time[:,1] > 0.) * contact_filt
+		self.feet_air_time[:,1] += self.dt
+		rew_airTime = (self.feet_air_time[:,1] - 0.5) * first_contact # reward only on first contact with the ground
 		rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
-		self.feet_air_time[:,foot_index] *= ~on_ground
+		self.feet_air_time[:,1] *= ~contact_filt
 		return rew_airTime	
 
 	def _reward_agent_2_collision(self):
 		# Penalize collisions on selected bodies
-		return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices[2:4], :], dim=-1) > 0.1), dim=1)
+		return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices[[2,3]], :], dim=-1) > 0.1), dim=1)
 
 
 	def _reward_agent_3_torques(self):
@@ -1059,20 +1102,19 @@ class LeggedRobot(BaseTask):
 	def _reward_agent_3_foot_air_time(self):
 		# Reward long steps
 		# Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
-		foot_index = 2
-		contact = self.contact_forces[:, 4*(foot_index+1), 2] > 1.
-		on_ground = torch.logical_or(contact, self.last_contacts[:,foot_index])
-		self.last_contacts[:,foot_index] = contact
-		first_contact = (self.feet_air_time[:,foot_index] > 0.) * on_ground
-		self.feet_air_time[:,foot_index] += self.dt
-		rew_airTime = (self.feet_air_time[:,foot_index] - 0.5) * first_contact # reward only on first contact with the ground
+		contact = self.contact_forces[:, 12, 2] > 1.
+		contact_filt = torch.logical_or(contact, self.last_contacts[:,2])
+		self.last_contacts[:,2] = contact
+		first_contact = (self.feet_air_time[:,2] > 0.) * contact_filt
+		self.feet_air_time[:,2] += self.dt
+		rew_airTime = (self.feet_air_time[:,2] - 0.5) * first_contact # reward only on first contact with the ground
 		rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
-		self.feet_air_time[:,foot_index] *= ~on_ground
+		self.feet_air_time[:,2] *= ~contact_filt
 		return rew_airTime	
 
 	def _reward_agent_3_collision(self):
 		# Penalize collisions on selected bodies
-		return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices[4:6], :], dim=-1) > 0.1), dim=1)
+		return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices[[4,5]], :], dim=-1) > 0.1), dim=1)
 
 
 	def _reward_agent_4_torques(self):
@@ -1090,20 +1132,19 @@ class LeggedRobot(BaseTask):
 	def _reward_agent_4_foot_air_time(self):
 		# Reward long steps
 		# Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
-		foot_index = 3
-		contact = self.contact_forces[:, 4*(foot_index+1), 2] > 1.
-		on_ground = torch.logical_or(contact, self.last_contacts[:,foot_index])
-		self.last_contacts[:,foot_index] = contact
-		first_contact = (self.feet_air_time[:,foot_index] > 0.) * on_ground
-		self.feet_air_time[:,foot_index] += self.dt
-		rew_airTime = (self.feet_air_time[:,foot_index] - 0.5) * first_contact # reward only on first contact with the ground
+		contact = self.contact_forces[:, 16, 2] > 1.
+		contact_filt = torch.logical_or(contact, self.last_contacts[:,3])
+		self.last_contacts[:,3] = contact
+		first_contact = (self.feet_air_time[:,3] > 0.) * contact_filt
+		self.feet_air_time[:,3] += self.dt
+		rew_airTime = (self.feet_air_time[:,3] - 0.5) * first_contact # reward only on first contact with the ground
 		rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
-		self.feet_air_time[:,foot_index] *= ~on_ground
+		self.feet_air_time[:,3] *= ~contact_filt
 		return rew_airTime	
 	
 	def _reward_agent_4_collision(self):
 		# Penalize collisions on selected bodies
-		return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices[6:8], :], dim=-1) > 0.1), dim=1)
+		return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices[[6,7]], :], dim=-1) > 0.1), dim=1)
 
 
 	def _reward_agent_1_2_torques(self):
@@ -1121,15 +1162,12 @@ class LeggedRobot(BaseTask):
 	def _reward_agent_1_2_foot_air_time(self):
 		# Reward long steps
 		# Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
-		foot_index = 0
 		contact = self.contact_forces[:, [4,8], 2] > 1.
 		on_ground = torch.logical_or(contact, self.last_contacts[:,[0,1]])
 		self.last_contacts[:,[0,1]] = contact
 		first_contact = (self.feet_air_time[:,[0,1]] > 0.) * on_ground
 		self.feet_air_time[:,[0,1]] += self.dt
-		print(torch.sum(self.feet_air_time[:,[0,1]] - 0.5).shape, first_contact.shape)
-		rew_airTime = torch.sum(self.feet_air_time[:,[0,1]] - 0.5) * first_contact # reward only on first contact with the ground
-		print(rew_airTime.shape, torch.norm(self.commands[:, :2], dim=1).shape)
+		rew_airTime = torch.sum((self.feet_air_time[:,[0,1]] - 0.5) * first_contact, dim=1) # reward only on first contact with the ground
 		rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
 		self.feet_air_time[:,[0,1]] *= ~on_ground
 		return rew_airTime	
@@ -1153,12 +1191,12 @@ class LeggedRobot(BaseTask):
 	def _reward_agent_2_2_foot_air_time(self):
 		# Reward long steps
 		# Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
-		contact = self.contact_forces[:, [8,12], 2] > 1.
+		contact = self.contact_forces[:, [12,16], 2] > 1.
 		on_ground = torch.logical_or(contact, self.last_contacts[:,[2,3]])
 		self.last_contacts[:,[2,3]] = contact
 		first_contact = (self.feet_air_time[:,[2,3]] > 0.) * on_ground
 		self.feet_air_time[:,[2,3]] += self.dt
-		rew_airTime = torch.sum(self.feet_air_time[:,[2,3]] - 0.5, dim=0) * first_contact # reward only on first contact with the ground
+		rew_airTime = torch.sum((self.feet_air_time[:,[2,3]] - 0.5) * first_contact, dim=1) # reward only on first contact with the ground
 		rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
 		self.feet_air_time[:,[2,3]] *= ~on_ground
 		return rew_airTime	

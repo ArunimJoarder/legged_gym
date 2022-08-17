@@ -36,15 +36,15 @@ class AnymalCMARL_2_FlatCfg( AnymalCFlatCfg ):
 		num_dof_per_agent = 12//num_agents
 		num_actions_per_agent = 12//num_agents
 		num_obs_per_agent = 48
-		num_privileged_obs_per_agent = None
+		num_privileged_obs_per_agent = 48
 
 	class asset( AnymalCFlatCfg.asset ):
-		# penalize_contacts_on = ["LF_SHANK", "LF_THIGH", "LH_SHANK", "LH_THIGH", "RF_SHANK", "RF_THIGH", "RH_SHANK", "RH_THIGH"]
+		penalize_contacts_on = ["LF_SHANK", "LF_THIGH", "LH_SHANK", "LH_THIGH", "RF_SHANK", "RF_THIGH", "RH_SHANK", "RH_THIGH"]
 		pass
 
 	class rewards( AnymalCFlatCfg.rewards ):
 		class scales( AnymalCFlatCfg.rewards.scales ):
-			pass
+			# pass
 			# termination = -0.0
 			# tracking_lin_vel = 1.0
 			# tracking_ang_vel = 0.5
@@ -63,7 +63,7 @@ class AnymalCMARL_2_FlatCfg( AnymalCFlatCfg ):
 			
 			dof_acc = 0.
 			dof_vel = 0.
-			feet_air_time =  2.
+			feet_air_time =  0.
 			action_rate = 0.
 			torques = 0.
 			
@@ -82,21 +82,22 @@ class AnymalCMARL_2_FlatCfg( AnymalCFlatCfg ):
 			agent_1_2_torques = -0.000025
 			agent_1_2_dof_acc = -2.5e-7
 			agent_1_2_action_rate = -0.01
-			# agent_1_2_foot_air_time =  2.
+			agent_1_2_foot_air_time =  2.
 			agent_1_2_collision = -1.
 
 			agent_2_2_torques = -0.000025
 			agent_2_2_dof_acc = -2.5e-7
 			agent_2_2_action_rate = -0.01
-			# agent_2_2_foot_air_time =  2.
+			agent_2_2_foot_air_time =  2.
 			agent_2_2_collision = -1.
 
 class AnymalCMARL_2_FlatCfgPPO( AnymalCFlatCfgPPO ):
 	class policy( AnymalCFlatCfgPPO.policy ):
-		# actor_hidden_dims = [128, 64, 32]
-		# critic_hidden_dims = [128, 64, 32]
-		# activation = 'elu' # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
+		actor_hidden_dims = [64, 64, 16]
+		critic_hidden_dims = [64, 64, 16]
+		activation = 'elu' # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
 		pass
 
 	class runner ( AnymalCFlatCfgPPO.runner):
 		experiment_name = 'marl_2_flat_anymal_c'
+		max_iterations = 300 # number of policy updates
